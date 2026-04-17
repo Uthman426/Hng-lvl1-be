@@ -3,7 +3,7 @@ import { connectDB } from "@/lib/mongodb";
 import Profile from "@/models/Profile";
 import { fetchExternalData } from "@/lib/external";
 import { getAgeGroup } from "@/lib/utils";
-import { v4 as uuidv4 } from "uuid";
+import { jsonResponse } from "@/lib/response";
 
 export async function POST(req) {
   try {
@@ -23,11 +23,27 @@ export async function POST(req) {
     // Check duplicate
     const existing = await Profile.findOne({ name });
     if (existing) {
-      return Response.json({
-        status: "success",
-        message: "Profile already exists",
-        data: existing,
-      });
+    //   return Response.json({
+    //     status: "success",
+    //     message: "Profile already exists",
+    //     data: existing,
+    //   });
+    return jsonResponse({
+  status: "success",
+  message: "Profile already exists",
+  data: {
+    id: existing._id.toString(),
+    name: existing.name,
+    gender: existing.gender,
+    gender_probability: existing.gender_probability,
+    sample_size: existing.sample_size,
+    age: existing.age,
+    age_group: existing.age_group,
+    country_id: existing.country_id,
+    country_probability: existing.country_probability,
+    created_at: existing.created_at,
+  },
+});
     }
 
     let data;
@@ -51,7 +67,6 @@ export async function POST(req) {
     );
 
     const profile = await Profile.create({
-      id: uuidv4(),
       name,
       gender: gender.gender,
       gender_probability: gender.probability,
@@ -62,10 +77,24 @@ export async function POST(req) {
       country_probability: topCountry.probability,
     });
 
-    return Response.json(
-      { status: "success", data: profile },
-      { status: 201 }
-    );
+    return jsonResponse(
+  {
+    status: "success",
+    data: {
+      id: profile._id.toString(),
+      name: profile.name,
+      gender: profile.gender,
+      gender_probability: profile.gender_probability,
+      sample_size: profile.sample_size,
+      age: profile.age,
+      age_group: profile.age_group,
+      country_id: profile.country_id,
+      country_probability: profile.country_probability,
+      created_at: profile.created_at,
+    },
+  },
+  201
+);
   } catch (err) {
     return Response.json(
       { status: "error", message: "Server error" },
@@ -89,13 +118,25 @@ export async function GET(req) {
   if (country_id) filter.country_id = new RegExp(`^${country_id}$`, "i");
   if (age_group) filter.age_group = new RegExp(`^${age_group}$`, "i");
 
-  const profiles = await Profile.find(filter);
+  const profiles = await Profile.find(filter).lean();
 
-  return Response.json({
+//   return Response.json({
+//     status: "success",
+//     count: profiles.length,
+//     data: profiles.map(p => ({
+//       id: p._id,
+//       name: p.name,
+//       gender: p.gender,
+//       age: p.age,
+//       age_group: p.age_group,
+//       country_id: p.country_id,
+//     })),
+//   });
+return jsonResponse({
     status: "success",
     count: profiles.length,
     data: profiles.map(p => ({
-      id: p._id,
+      id: p._id.toString(), // ✅ FIX
       name: p.name,
       gender: p.gender,
       age: p.age,
@@ -104,17 +145,13 @@ export async function GET(req) {
     })),
   });
 }
-export async function DELETE(req, { params }) {
-  await connectDB();
-
-  const deleted = await Profile.findByIdAndDelete(params.id);
-
-  if (!deleted) {
-    return Response.json(
-      { status: "error", message: "Profile not found" },
-      { status: 404 }
-    );
-  }
-
-  return new Response(null, { status: 204 });
+export function OPTIONS() {
+  return new Response(null, {
+    status: 204,
+    headers: {
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "GET,POST,DELETE,OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type",
+    },
+  });
 }

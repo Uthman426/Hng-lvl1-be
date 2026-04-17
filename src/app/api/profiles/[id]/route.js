@@ -1,21 +1,62 @@
 
 import { connectDB } from "@/lib/mongodb";
 import Profile from "@/models/Profile";
+import { jsonResponse } from "@/lib/response";
 
 export async function GET(req, { params }) {
   await connectDB();
 
-  const profile = await Profile.findById(params.id);
+  const profile = await Profile.findById(params.id).lean();
 
   if (!profile) {
-    return Response.json(
+    return jsonResponse(
       { status: "error", message: "Profile not found" },
-      { status: 404 }
+      404
     );
   }
 
-  return Response.json({
+  return jsonResponse({
     status: "success",
-    data: profile,
+    data: {
+      id: profile._id.toString(),
+      name: profile.name,
+      gender: profile.gender,
+      gender_probability: profile.gender_probability,
+      sample_size: profile.sample_size,
+      age: profile.age,
+      age_group: profile.age_group,
+      country_id: profile.country_id,
+      country_probability: profile.country_probability,
+      created_at: profile.created_at,
+    },
+  });
+}
+export async function DELETE(req, { params }) {
+  await connectDB();
+
+  const deleted = await Profile.findByIdAndDelete(params.id);
+
+  if (!deleted) {
+    return jsonResponse(
+      { status: "error", message: "Profile not found" },
+      404
+    );
+  }
+
+  return new Response(null, {
+    status: 204,
+    headers: {
+      "Access-Control-Allow-Origin": "*",
+    },
+  });
+}
+export function OPTIONS() {
+  return new Response(null, {
+    status: 204,
+    headers: {
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "GET,POST,DELETE,OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type",
+    },
   });
 }
