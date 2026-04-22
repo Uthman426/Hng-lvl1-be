@@ -4,6 +4,7 @@ import Profile from "@/models/Profile";
 import { fetchExternalData } from "@/lib/external";
 import { getAgeGroup } from "@/lib/utils";
 import { jsonResponse } from "@/lib/response";
+import { v7 as uuidv7 } from "uuid";
 
 export async function POST(req) {
   try {
@@ -32,7 +33,7 @@ export async function POST(req) {
   status: "success",
   message: "Profile already exists",
   data: {
-    id: existing._id.toString(),
+    id: existing.id,
     name: existing.name,
     gender: existing.gender,
     gender_probability: existing.gender_probability,
@@ -40,6 +41,7 @@ export async function POST(req) {
     age: existing.age,
     age_group: existing.age_group,
     country_id: existing.country_id,
+    country_name: existing.country_name,
     country_probability: existing.country_probability,
     created_at: existing.created_at,
   },
@@ -50,7 +52,7 @@ export async function POST(req) {
     try {
       data = await fetchExternalData(name);
     } catch (err) {
-      return Response.json(
+      return jsonResponse(
         {
           status: "error",
           message: `${err.message} returned an invalid response`,
@@ -67,21 +69,23 @@ export async function POST(req) {
     );
 
     const profile = await Profile.create({
-      name,
-      gender: gender.gender,
-      gender_probability: gender.probability,
-      sample_size: gender.count,
-      age: age.age,
-      age_group: getAgeGroup(age.age),
-      country_id: topCountry.country_id,
-      country_probability: topCountry.probability,
-    });
+  id: uuidv7(), 
+  name,
+  gender: gender.gender,
+  gender_probability: gender.probability,
+  sample_size: gender.count,
+  age: age.age,
+  age_group: getAgeGroup(age.age),
+  country_id: topCountry.country_id,
+  country_name: topCountry.name || "Unknown",
+  country_probability: topCountry.probability,
+});
 
     return jsonResponse(
   {
     status: "success",
     data: {
-      id: profile._id.toString(),
+      id: profile.id,
       name: profile.name,
       gender: profile.gender,
       gender_probability: profile.gender_probability,
@@ -89,6 +93,7 @@ export async function POST(req) {
       age: profile.age,
       age_group: profile.age_group,
       country_id: profile.country_id,
+      country_name: profile.country_name,
       country_probability: profile.country_probability,
       created_at: profile.created_at,
     },
@@ -108,40 +113,100 @@ export async function GET(req) {
 
   const { searchParams } = new URL(req.url);
 
-  const gender = searchParams.get("gender");
-  const country_id = searchParams.get("country_id");
-  const age_group = searchParams.get("age_group");
-
   let filter = {};
 
-  if (gender) filter.gender = new RegExp(`^${gender}$`, "i");
-  if (country_id) filter.country_id = new RegExp(`^${country_id}$`, "i");
-  if (age_group) filter.age_group = new RegExp(`^${age_group}$`, "i");
+  // ===== FILTERS =====
+  const gender = searchParams.get("gender");
+  const age_group = searchParams.get("age_group");
+  const country_id = searchParams.get("country_id");
 
-  const profiles = await Profile.find(filter).lean();
+  if (gender) filter.gender = gender.toLowerCase();
+  if (age_group) filter.age_group = age_group.toLowerCase();
+  if (country_id) filter.country_id = country_id.toUpperCase();
+  
 
-//   return Response.json({
-//     status: "success",
-//     count: profiles.length,
-//     data: profiles.map(p => ({
-//       id: p._id,
-//       name: p.name,
-//       gender: p.gender,
-//       age: p.age,
-//       age_group: p.age_group,
-//       country_id: p.country_id,
-//     })),
-//   });
-return jsonResponse({
+  // Range filters
+  const min_age = searchParams.get("min_age");
+  const max_age = searchParams.get("max_age");
+
+  if (min_age || max_age) {
+    filter.age = {};
+    if (min_age) filter.age.$gte = Number(min_age);
+    if (max_age) filter.age.$lte = Number(max_age);
+  }
+  if (
+  (min_age && isNaN(min_age)) ||
+  (max_age && isNaN(max_age)) ||
+  (min_gender_prob && isNaN(min_gender_prob)) ||
+  (min_country_prob && isNaN(min_country_prob))
+) {
+  return jsonResponse(
+    { status: "error", message: "Invalid query parameters" },
+    422
+  );
+}
+
+  const min_gender_prob = searchParams.get("min_gender_probability");
+  if (min_gender_prob) {
+    filter.gender_probability = { $gte: Number(min_gender_prob) };
+  }
+
+  const min_country_prob = searchParams.get("min_country_probability");
+  if (min_country_prob) {
+    filter.country_probability = { $gte: Number(min_country_prob) };
+  }
+
+  // ===== SORTING =====
+  const sort_by = searchParams.get("sort_by") || "created_at";
+  const order = searchParams.get("order") === "asc" ? 1 : -1;
+
+  const allowedSort = ["age", "created_at", "gender_probability"];
+  if (!allowedSort.includes(sort_by)) {
+    return jsonResponse(
+      { status: "error", message: "Invalid query parameters" },
+      422
+    );
+  }
+  if (order !== 1 && order !== -1) {
+  return jsonResponse(
+    { status: "error", message: "Invalid query parameters" },
+    422
+  );
+}
+
+  const sort = {};
+  sort[sort_by] = order;
+
+  // ===== PAGINATION =====
+  const page = Number(searchParams.get("page")) || 1;
+  const limit = Math.min(Number(searchParams.get("limit")) || 10, 50);
+  const skip = (page - 1) * limit;
+
+  // ===== QUERY =====
+  const total = await Profile.countDocuments(filter);
+
+  const profiles = await Profile.find(filter)
+    .sort(sort)
+    .skip(skip)
+    .limit(limit)
+    .lean();
+
+  return jsonResponse({
     status: "success",
-    count: profiles.length,
+    page,
+    limit,
+    total,
     data: profiles.map(p => ({
-      id: p._id.toString(), // ✅ FIX
+      id: p.id,
       name: p.name,
       gender: p.gender,
+      gender_probability: p.gender_probability,
       age: p.age,
       age_group: p.age_group,
       country_id: p.country_id,
+      country_name: p.country_name,
+      country_probability: p.country_probability,
+      created_at: p.created_at,
     })),
   });
 }

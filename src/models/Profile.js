@@ -1,17 +1,18 @@
-
 import mongoose from "mongoose";
 
 const ProfileSchema = new mongoose.Schema({
-  name: { type: String, required: true, unique: true, lowercase: true },
+  id: { type: String, unique: true, required: true }, // ✅ UUID v7
+
+  name: { type: String, required: true, unique: true },
 
   gender: String,
   gender_probability: Number,
-  sample_size: Number,
 
   age: Number,
   age_group: String,
 
   country_id: String,
+  country_name: String,
   country_probability: Number,
 
   created_at: {
@@ -19,6 +20,9 @@ const ProfileSchema = new mongoose.Schema({
     default: Date.now,
   },
 });
+
+ProfileSchema.index({ name: 1 });
+ProfileSchema.index({ gender: 1, age: 1, country_id: 1 });
 
 export default mongoose.models.Profile ||
   mongoose.model("Profile", ProfileSchema);

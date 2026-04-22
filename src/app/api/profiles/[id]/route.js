@@ -3,10 +3,12 @@ import { connectDB } from "@/lib/mongodb";
 import Profile from "@/models/Profile";
 import { jsonResponse } from "@/lib/response";
 
-export async function GET(req, { params }) {
-  await connectDB();
+export async function GET(req, context) {
+   await connectDB();
 
-  const profile = await Profile.findById(params.id).lean();
+  const { id } = await context.params;
+
+  const profile = await Profile.findById(id).lean();
 
   if (!profile) {
     return jsonResponse(
@@ -18,7 +20,7 @@ export async function GET(req, { params }) {
   return jsonResponse({
     status: "success",
     data: {
-      id: profile._id.toString(),
+      id: profile.id,
       name: profile.name,
       gender: profile.gender,
       gender_probability: profile.gender_probability,
@@ -26,17 +28,20 @@ export async function GET(req, { params }) {
       age: profile.age,
       age_group: profile.age_group,
       country_id: profile.country_id,
+      country_name: profile.country_name,
       country_probability: profile.country_probability,
       created_at: profile.created_at,
     },
-  });
+  },);
 }
-export async function DELETE(req, { params }) {
-  await connectDB();
+export async function DELETE(req, context) {
+   await connectDB();
 
-  const deleted = await Profile.findByIdAndDelete(params.id);
+  const { id } = await context.params;
 
-  if (!deleted) {
+  const profile = await Profile.findById(id).lean();
+
+  if (!profile) {
     return jsonResponse(
       { status: "error", message: "Profile not found" },
       404
