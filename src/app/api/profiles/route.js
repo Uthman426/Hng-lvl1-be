@@ -13,7 +13,7 @@ export async function POST(req) {
     const body = await req.json();
 
     if (!body.name || typeof body.name !== "string") {
-      return Response.json(
+      return jsonResponse(
         { status: "error", message: "Missing or invalid name" },
         { status: 400 }
       );
@@ -101,7 +101,7 @@ export async function POST(req) {
   201
 );
   } catch (err) {
-    return Response.json(
+    return jsonResponse(
       { status: "error", message: "Server error" },
       { status: 500 }
     );
@@ -120,7 +120,16 @@ export async function GET(req) {
   const age_group = searchParams.get("age_group");
   const country_id = searchParams.get("country_id");
 
-  if (gender) filter.gender = gender.toLowerCase();
+  if (gender) {
+  const g = gender.toLowerCase();
+  if (!["male", "female"].includes(g)) {
+    return jsonResponse(
+      { status: "error", message: "Invalid query parameters" },
+      422
+    );
+  }
+  filter.gender = g;
+}
   if (age_group) filter.age_group = age_group.toLowerCase();
   if (country_id) filter.country_id = country_id.toUpperCase();
   
@@ -128,6 +137,8 @@ export async function GET(req) {
   // Range filters
   const min_age = searchParams.get("min_age");
   const max_age = searchParams.get("max_age");
+  const min_gender_prob = searchParams.get("min_gender_probability");
+  const min_country_prob = searchParams.get("min_country_probability");
 
   if (min_age || max_age) {
     filter.age = {};
@@ -146,12 +157,12 @@ export async function GET(req) {
   );
 }
 
-  const min_gender_prob = searchParams.get("min_gender_probability");
+  
   if (min_gender_prob) {
     filter.gender_probability = { $gte: Number(min_gender_prob) };
   }
 
-  const min_country_prob = searchParams.get("min_country_probability");
+  
   if (min_country_prob) {
     filter.country_probability = { $gte: Number(min_country_prob) };
   }
@@ -167,7 +178,9 @@ export async function GET(req) {
       422
     );
   }
-  if (order !== 1 && order !== -1) {
+ const orderParam = searchParams.get("order");
+
+if (orderParam && !["asc", "desc"].includes(orderParam)) {
   return jsonResponse(
     { status: "error", message: "Invalid query parameters" },
     422

@@ -1,36 +1,128 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://github.com/vercel/next.js/tree/canary/packages/create-next-app).
+Intelligence Query Engine API (Stage 2)
+// Overview
 
-## Getting Started
+This project is a backend API built with Next.js (App Router) and MongoDB that provides demographic intelligence data.
 
-First, run the development server:
+It allows users to:
 
-```bash
+Store demographic profiles
+Filter, sort, and paginate results
+Query data using natural language
+// Features
+// Advanced Filtering
+
+Supports:
+
+gender
+age_group
+country_id
+min_age / max_age
+min_gender_probability
+min_country_probability
+
+All filters are combinable (AND logic).
+
+// Sorting
+
+Supported fields:
+
+age
+created_at
+gender_probability
+
+Order:
+
+asc
+desc
+// Pagination
+page (default: 1)
+limit (default: 10, max: 50)
+
+Uses MongoDB skip and limit.
+
+// Natural Language Search
+
+Endpoint:
+
+GET /api/profiles/search?q=<query>
+//Parsing Approach
+
+The system uses a rule-based parser (no AI/LLM).
+
+Supported Keywords
+Keyword	Meaning
+male	gender = male
+female	gender = female
+young	age 16–24
+above X	age >= X
+adult	age_group = adult
+teenager	age_group = teenager
+nigeria	country_id = NG
+kenya	country_id = KE
+angola	country_id = AO
+//Examples
+Query	Output
+young males	gender=male, age 16–24
+females above 30	gender=female, age ≥ 30
+adult males from nigeria	gender=male, age_group=adult, country=NG
+// Limitations
+Cannot parse complex sentences
+Limited country mapping
+No synonym support
+Cannot handle multiple age ranges
+"young" is not stored in DB
+Data Model
+
+Each profile contains:
+
+id (UUID v7)
+name (unique)
+gender
+gender_probability
+age
+age_group
+country_id
+country_name
+country_probability
+created_at
+ Performance Optimization
+
+Indexes used:
+
+ProfileSchema.index({ gender: 1 });
+ProfileSchema.index({ age: 1 });
+ProfileSchema.index({ country_id: 1 });
+Why?
+
+Indexes improve query speed by avoiding full collection scans.
+
+ API Endpoints
+GET /api/profiles
+
+Supports:
+
+filtering
+sorting
+pagination
+GET /api/profiles/search
+
+Natural language query endpoint.
+
+POST /api/profiles
+
+Creates a profile using external APIs.
+ Data Seeding
+
+A dataset of profiles is seeded into the database using a script:
+
+node script.js
+
+The script uses upsert to prevent duplicates.
+
+🛠️ Setup
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
-
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
-
-You can start editing the page by modifying `app/page.js`. The page auto-updates as you edit the file.
-
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Notes
+All timestamps are in UTC (ISO 8601)
+CORS is enabled
+Query validation is enforced

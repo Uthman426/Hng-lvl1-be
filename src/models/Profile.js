@@ -21,7 +21,7 @@ const ProfileSchema = new mongoose.Schema({
   },
 });
 
-ProfileSchema.index({ name: 1 });
+
 ProfileSchema.index({ gender: 1, age: 1, country_id: 1 });
 
 export default mongoose.models.Profile ||
