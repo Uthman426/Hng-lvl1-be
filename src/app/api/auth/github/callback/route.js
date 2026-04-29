@@ -100,7 +100,7 @@ export async function GET(req) {
     });
   }
 
-  const webUrl = process.env.WEB_URL || "http://localhost:3001";
+  const webUrl = process.env.WEB_URL ;
 
   const response = NextResponse.redirect(`${webUrl}/dashboard`);
 
