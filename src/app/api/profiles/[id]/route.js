@@ -1,14 +1,30 @@
-
+import mongoose from "mongoose";
 import { connectDB } from "@/lib/mongodb";
 import Profile from "@/models/Profile";
 import { jsonResponse } from "@/lib/response";
+import { requireApiVersion, requireAuth, requireRole } from "@/lib/guards";
+
+async function findProfile(id) {
+  const query = [{ id }];
+
+  if (mongoose.Types.ObjectId.isValid(id)) {
+    query.push({ _id: id });
+  }
+
+  return Profile.findOne({ $or: query }).lean();
+}
 
 export async function GET(req, context) {
-   await connectDB();
+  const versionError = requireApiVersion(req);
+  if (versionError) return versionError;
+
+  const { response } = await requireAuth(req);
+  if (response) return response;
+
+  await connectDB();
 
   const { id } = await context.params;
-
-  const profile = await Profile.findById(id).lean();
+  const profile = await findProfile(id);
 
   if (!profile) {
     return jsonResponse(
@@ -20,7 +36,7 @@ export async function GET(req, context) {
   return jsonResponse({
     status: "success",
     data: {
-      id: profile.id,
+      id: profile.id || String(profile._id),
       name: profile.name,
       gender: profile.gender,
       gender_probability: profile.gender_probability,
@@ -32,14 +48,23 @@ export async function GET(req, context) {
       country_probability: profile.country_probability,
       created_at: profile.created_at,
     },
-  },);
+  });
 }
+
 export async function DELETE(req, context) {
-   await connectDB();
+  const versionError = requireApiVersion(req);
+  if (versionError) return versionError;
+
+  const { user, response } = await requireAuth(req);
+  if (response) return response;
+
+  const roleError = requireRole(user, "admin");
+  if (roleError) return roleError;
+
+  await connectDB();
 
   const { id } = await context.params;
-
-  const profile = await Profile.findById(id).lean();
+  const profile = await findProfile(id);
 
   if (!profile) {
     return jsonResponse(
@@ -48,20 +73,21 @@ export async function DELETE(req, context) {
     );
   }
 
-  return new Response(null, {
-    status: 204,
-    headers: {
-      "Access-Control-Allow-Origin": "*",
-    },
-  });
+  await Profile.deleteOne({ _id: profile._id });
+
+  return new Response(null, { status: 204 });
 }
+
 export function OPTIONS() {
   return new Response(null, {
     status: 204,
     headers: {
-      "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Methods": "GET,POST,DELETE,OPTIONS",
-      "Access-Control-Allow-Headers": "Content-Type",
+      "Access-Control-Allow-Origin":
+        process.env.WEB_URL || "http://localhost:3001",
+      "Access-Control-Allow-Methods": "GET,DELETE,OPTIONS",
+      "Access-Control-Allow-Headers":
+        "Content-Type, Authorization, X-API-Version",
+      "Access-Control-Allow-Credentials": "true",
     },
   });
 }
