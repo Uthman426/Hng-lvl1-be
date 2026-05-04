@@ -1,62 +1,42 @@
+import { v7 as uuidv7 } from "uuid";
 import { connectDB } from "@/lib/mongodb";
 import Profile from "@/models/Profile";
 import { jsonResponse } from "@/lib/response";
-import { requireApiVersion, requireAuth } from "@/lib/guards";
+import { requireApiVersion, requireAuth, requireRole } from "@/lib/guards";
+import { fetchExternalData } from "@/lib/external";
+import { getAgeGroup } from "@/lib/utils";
+import { getCache, setCache, clearCache } from "@/lib/cache";
+import {
+  PROFILE_PROJECTION,
+  parseListFilters,
+  serializeProfile,
+  stableCacheKey,
+} from "@/lib/query";
 
-function parseQuery(q) {
-  const text = q.toLowerCase();
-  const filter = {};
+const ALLOWED_SORT_FIELDS = new Set([
+  "age",
+  "created_at",
+  "gender_probability",
+  "country_probability",
+]);
 
-  if (text.includes("female")) {
-    filter.gender = "female";
-  } else if (text.includes("male")) {
-    filter.gender = "male";
-  }
+function parsePagination(searchParams) {
+  const page = Math.max(Number(searchParams.get("page")) || 1, 1);
+  const limit = Math.min(Math.max(Number(searchParams.get("limit")) || 10, 1), 50);
+  const skip = (page - 1) * limit;
 
-  if (text.includes("young")) {
-    filter.age = { $gte: 16, $lte: 24 };
-  }
-
-  const aboveMatch = text.match(/above (\d+)/);
-  if (aboveMatch) {
-    filter.age = { $gte: Number(aboveMatch[1]) };
-  }
-
-  if (text.includes("adult")) filter.age_group = "adult";
-  if (text.includes("teenager")) filter.age_group = "teenager";
-
-  const countries = {
-    nigeria: "NG",
-    kenya: "KE",
-    angola: "AO",
-    ghana: "GH",
-    america: "US",
-    usa: "US",
-    "united states": "US",
-  };
-
-  for (const key in countries) {
-    if (text.includes(key)) {
-      filter.country_id = countries[key];
-    }
-  }
-
-  return filter;
+  return { page, limit, skip };
 }
 
-function serializeProfile(p) {
-  return {
-    id: p.id || String(p._id),
-    name: p.name,
-    gender: p.gender,
-    gender_probability: p.gender_probability,
-    age: p.age,
-    age_group: p.age_group,
-    country_id: p.country_id,
-    country_name: p.country_name,
-    country_probability: p.country_probability,
-    created_at: p.created_at,
-  };
+function parseSort(searchParams) {
+  const requestedSort = searchParams.get("sort_by") || "created_at";
+  const sortBy = ALLOWED_SORT_FIELDS.has(requestedSort)
+    ? requestedSort
+    : "created_at";
+
+  const order = searchParams.get("order") === "asc" ? 1 : -1;
+
+  return { sortBy, order };
 }
 
 export async function GET(req) {
@@ -69,58 +49,140 @@ export async function GET(req) {
   await connectDB();
 
   const { searchParams } = new URL(req.url);
-  const q = searchParams.get("q");
 
-  if (!q || !q.trim()) {
-    return jsonResponse(
-      { status: "error", message: "Missing query" },
-      400
-    );
+  const filter = parseListFilters(searchParams);
+  const { page, limit, skip } = parsePagination(searchParams);
+  const { sortBy, order } = parseSort(searchParams);
+
+  const cacheKey = stableCacheKey("profiles:list:v1", {
+    filter,
+    page,
+    limit,
+    sortBy,
+    order,
+  });
+
+  const cached = getCache(cacheKey);
+  if (cached) {
+    return jsonResponse({
+      ...cached,
+      cache: "hit",
+    });
   }
 
-  const page = Math.max(Number(searchParams.get("page")) || 1, 1);
-  const limit = Math.min(Math.max(Number(searchParams.get("limit")) || 10, 1), 50);
-  const skip = (page - 1) * limit;
+  const [total, profiles] = await Promise.all([
+    Profile.countDocuments(filter),
+    Profile.find(filter)
+      .select(PROFILE_PROJECTION)
+      .sort({ [sortBy]: order, _id: 1 })
+      .skip(skip)
+      .limit(limit)
+      .lean(),
+  ]);
 
-  const parsedFilter = parseQuery(q);
-
-  const filter =
-    Object.keys(parsedFilter).length > 0
-      ? parsedFilter
-      : {
-          name: {
-            $regex: q.trim(),
-            $options: "i",
-          },
-        };
-
-  const total = await Profile.countDocuments(filter);
   const total_pages = Math.ceil(total / limit);
 
-  const profiles = await Profile.find(filter)
-    .skip(skip)
-    .limit(limit)
-    .lean();
-
-  const base = `/api/profiles/search?q=${encodeURIComponent(q)}`;
-
-  return jsonResponse({
+  const base = "/api/profiles";
+  const body = {
     status: "success",
     page,
     limit,
     total,
     total_pages,
     links: {
-      self: `${base}&page=${page}&limit=${limit}`,
+      self: `${base}?page=${page}&limit=${limit}`,
       next:
         page < total_pages
-          ? `${base}&page=${page + 1}&limit=${limit}`
+          ? `${base}?page=${page + 1}&limit=${limit}`
           : null,
       prev:
         page > 1
-          ? `${base}&page=${page - 1}&limit=${limit}`
+          ? `${base}?page=${page - 1}&limit=${limit}`
           : null,
     },
     data: profiles.map(serializeProfile),
+  };
+
+  setCache(cacheKey, body, {
+    ttlMs: 60_000,
+    maxEntries: 500,
+  });
+
+  return jsonResponse({
+    ...body,
+    cache: "miss",
+  });
+}
+
+export async function POST(req) {
+  const versionError = requireApiVersion(req);
+  if (versionError) return versionError;
+
+  const { user, response } = await requireAuth(req);
+  if (response) return response;
+
+  const roleError = requireRole(user, "admin");
+  if (roleError) return roleError;
+
+  await connectDB();
+
+  const body = await req.json();
+  const name = body.name?.trim();
+
+  if (!name) {
+    return jsonResponse(
+      { status: "error", message: "Name is required" },
+      400
+    );
+  }
+
+  const exists = await Profile.findOne({ name }).select("_id").lean();
+
+  if (exists) {
+    return jsonResponse(
+      { status: "error", message: "Profile already exists" },
+      409
+    );
+  }
+
+  const { gender, age, nation } = await fetchExternalData(name);
+
+  const country = nation.country[0];
+
+  const profile = await Profile.create({
+    id: uuidv7(),
+    name,
+    gender: gender.gender,
+    gender_probability: gender.probability,
+    age: age.age,
+    age_group: getAgeGroup(age.age),
+    country_id: country.country_id,
+    country_name: country.country_id,
+    country_probability: country.probability,
+    created_at: new Date(),
+  });
+
+  clearCache();
+
+  return jsonResponse(
+    {
+      status: "success",
+      data: serializeProfile(profile),
+    },
+    201
+  );
+}
+
+export function OPTIONS() {
+  return new Response(null, {
+    status: 204,
+    headers: {
+      "Access-Control-Allow-Origin":
+        process.env.WEB_URL,
+      "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+      "Access-Control-Allow-Headers":
+        "Content-Type, Authorization, X-API-Version",
+      "Access-Control-Allow-Credentials": "true",
+    },
   });
 }
