@@ -100,27 +100,19 @@ export async function GET(req) {
     });
   }
 
-  const webUrl = process.env.WEB_URL ;
+  const webUrl = process.env.WEB_URL;
 
-  const response = NextResponse.redirect(`${webUrl}/dashboard`);
+if (!webUrl) {
+  return Response.json(
+    { status: "error", message: "Missing WEB_URL environment variable" },
+    { status: 500 }
+  );
+}
 
-  response.cookies.set("access_token", access_token, {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
-    path: "/",
-    maxAge: 60 * 3,
-  });
+const sessionUrl = new URL(`${webUrl}/api/auth/session`);
+sessionUrl.searchParams.set("access_token", access_token);
+sessionUrl.searchParams.set("refresh_token", refresh_token);
 
-  response.cookies.set("refresh_token", refresh_token, {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
-    path: "/",
-    maxAge: 60 * 5,
-  });
+return NextResponse.redirect(sessionUrl.toString());
 
-  response.cookies.delete("pkce_verifier");
-
-  return response;
 }
